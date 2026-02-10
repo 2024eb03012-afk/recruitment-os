@@ -181,30 +181,12 @@ async function handleFormSubmit(e) {
     hideMessage();
 
     try {
-        // Using 'no-cors' mode and 'text/plain' to bypass CORS preflight checks 
-        // that often block requests from localhost to production n8n servers.
-        // Create the specific payload structure requested
-        const payload = [{
-            "headers": {
-                "host": "n8n.zenquill.tech",
-                "user-agent": navigator.userAgent,
-                "content-type": "application/json",
-                "origin": window.location.origin,
-                "referer": window.location.href
-            },
-            "params": {},
-            "query": {},
-            "body": formData,
-        }];
-
-        console.log('Sending payload:', payload);
-
-        console.log('Sending payload:', payload);
+        console.log('Sending payload:', formData);
 
         const response = await fetch(CONFIG.webhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(formData)
         });
 
         if (!response.ok) {
@@ -232,6 +214,7 @@ async function handleFormSubmit(e) {
 
 function collectFormData() {
     const formData = new FormData(elements.form);
+    const platforms = formData.getAll('platform');
 
     return {
         jobTitle: formData.get('jobTitle'),
@@ -239,7 +222,7 @@ function collectFormData() {
         location: formData.get('location'),
         country: formData.get('country'),
         numJobs: parseInt(formData.get('numJobs')),
-        platforms: formData.getAll('platform'),
+        platforms: platforms,
         linkedinKeywords: formData.get('linkedinKeywords') || null,
         companySize: formData.getAll('companySize'),
         salaryRange: {
