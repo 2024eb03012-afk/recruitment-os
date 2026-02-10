@@ -193,7 +193,11 @@ async function handleFormSubmit(e) {
         });
 
         if (!response.ok) {
-            throw new Error(`Server returned ${response.status} ${response.statusText}`);
+            if (response.status === 500) {
+                // Specific hint for n8n 500 errors
+                throw new Error('n8n Workflow Error (500). Check n8n Executions log.');
+            }
+            throw new Error(`Server error: ${response.status} ${response.statusText}`);
         }
 
         // With no-cors, we can't read the response status, 
@@ -209,7 +213,13 @@ async function handleFormSubmit(e) {
 
     } catch (error) {
         console.error('Form submission error:', error);
-        showMessage('error', 'Failed to submit request. Please check your connection and try again.');
+
+        let displayMsg = 'Failed to submit request. Please check your connection.';
+        if (error.message.includes('n8n') || error.message.includes('Server error')) {
+            displayMsg = error.message;
+        }
+
+        showMessage('error', displayMsg);
     } finally {
         setLoadingState(false);
     }
