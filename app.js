@@ -233,7 +233,6 @@ function collectFormData() {
         jobTitle: formData.get('jobTitle'),
         jobTypes: formData.getAll('jobType'),
         location: formData.get('location'),
-        country: formData.get('country'),
         numJobs: parseInt(formData.get('numJobs')),
         platforms: platforms,
         linkedinKeywords: formData.get('linkedinKeywords') || null,
