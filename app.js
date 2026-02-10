@@ -1,6 +1,6 @@
 // ===== Configuration =====
 const CONFIG = {
-    webhookUrl: 'https://n8n.smallgrp.com/webhook/3f956aa9-6f69-436a-952a-9aa80df55740',
+    webhookUrl: 'https://n8n.smallgrp.com/webhook-test/3f956aa9-6f69-436a-952a-9aa80df55740',
     // Google Sheet URL - Sheet 3 specific
     googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1DAVbKlf0bI3Dkmt8YQlAawoG7Oeez4px6vHhWy7Ts8w/gviz/tq?tqx=out:csv&sheet=Sheet3',
     // Auto-refresh interval in milliseconds (30 seconds)
