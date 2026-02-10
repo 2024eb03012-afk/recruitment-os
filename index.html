@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Professional recruitment agency job scraping dashboard with live analytics">
+    <title>Intelligent Job Board Scraper | Job Scraping Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <span class="logo-text">Intelligent Job Board Scraper</span>
+            </div>
+            <nav class="nav">
+                <span class="nav-item active">Dashboard</span>
+            </nav>
+            <div class="header-actions">
+                <button class="btn-refresh" id="refreshBtn" title="Refresh Data">Refresh</button>
+                <div class="status-indicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Live</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <!-- Section 1: Job Scraping Request Form -->
+        <section class="form-section">
+            <div class="form-card glass-card">
+                <form id="scrapingForm">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="jobTitle" class="form-label">Job Title <span class="required">*</span></label>
+                            <input type="text" id="jobTitle" name="jobTitle" class="form-input"
+                                placeholder="e.g. Software Engineer" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Job Type</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="jobType" value="remote">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">Remote</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="jobType" value="onsite">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">Onsite</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="location" class="form-label">Location</label>
+                            <input type="text" id="location" name="location" class="form-input"
+                                placeholder="e.g. New York">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="country" class="form-label">Country</label>
+                            <input type="text" id="country" name="country" class="form-input"
+                                placeholder="e.g. United States">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="numJobs" class="form-label">Number of Jobs <span
+                                    class="required">*</span></label>
+                            <input type="number" id="numJobs" name="numJobs" class="form-input" placeholder="e.g. 50"
+                                min="1" max="500" required>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label class="form-label">Job Platform</label>
+                            <div class="checkbox-group platforms">
+                                <label class="checkbox-label platform-checkbox">
+                                    <input type="checkbox" name="platform" value="linkedin" id="platformLinkedIn">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">LinkedIn</span>
+                                </label>
+                                <label class="checkbox-label platform-checkbox">
+                                    <input type="checkbox" name="platform" value="indeed" id="platformIndeed">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">Indeed</span>
+                                </label>
+                                <label class="checkbox-label platform-checkbox">
+                                    <input type="checkbox" name="platform" value="glassdoor" id="platformGlassdoor">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">Glassdoor</span>
+                                </label>
+                                <label class="checkbox-label platform-checkbox">
+                                    <input type="checkbox" name="platform" value="linkedin_post"
+                                        id="platformLinkedInPost">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">LinkedIn Post</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group full-width" id="linkedinKeywordsGroup" style="display: none;">
+                            <label for="linkedinKeywords" class="form-label">Job Searching Keywords <span
+                                    class="required">*</span></label>
+                            <input type="text" id="linkedinKeywords" name="linkedinKeywords" class="form-input"
+                                placeholder="e.g. hiring, looking for">
+                            <span class="form-hint">Required when LinkedIn Post is selected</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Company Size</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="companySize" value="small">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">Small</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="companySize" value="medium">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">Medium</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="companySize" value="large">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-text">Large</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Salary Range</label>
+                            <div class="salary-range-group">
+                                <div class="salary-input-wrapper">
+                                    <span class="salary-prefix">$</span>
+                                    <input type="number" id="salaryMin" name="salaryMin" class="form-input salary-input"
+                                        placeholder="Min">
+                                </div>
+                                <span class="salary-separator">to</span>
+                                <div class="salary-input-wrapper">
+                                    <span class="salary-prefix">$</span>
+                                    <input type="number" id="salaryMax" name="salaryMax" class="form-input salary-input"
+                                        placeholder="Max">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary" id="submitBtn">
+                            <span class="btn-text">Start Scraping</span>
+                            <span class="btn-loader" style="display: none;">Processing...</span>
+                        </button>
+                        <button type="reset" class="btn-secondary">Clear Form</button>
+                    </div>
+                </form>
+                <div id="formMessage" class="form-message" style="display: none;"></div>
+            </div>
+        </section>
+
+        <!-- Section 2: Live Analytics -->
+        <section class="analytics-section">
+
+            <!-- Metric Cards -->
+            <div class="analytics-grid" id="analyticsGrid"></div>
+
+            <!-- Charts Grid -->
+            <div class="charts-grid">
+                <div class="chart-card glass-card">
+                    <h3>Jobs by Company (Top 10)</h3>
+                    <canvas id="companyChart"></canvas>
+                </div>
+                <div class="chart-card glass-card">
+                    <h3>Jobs by Job Type</h3>
+                    <canvas id="jobTypeChart"></canvas>
+                </div>
+                <div class="chart-card glass-card">
+                    <h3>Jobs by City (Top 10)</h3>
+                    <canvas id="cityChart"></canvas>
+                </div>
+                <div class="chart-card glass-card">
+                    <h3>Match Score Distribution</h3>
+                    <canvas id="matchScoreChart"></canvas>
+                </div>
+                <div class="chart-card glass-card">
+                    <h3>Outreach Coverage</h3>
+                    <canvas id="outreachChart"></canvas>
+                </div>
+                <div class="chart-card glass-card">
+                    <h3>Role Category Split</h3>
+                    <canvas id="roleChart"></canvas>
+                </div>
+            </div>
+
+            <div id="analyticsError" class="error-state" style="display: none;">
+                <p>Failed to load analytics. <button class="btn-link" onclick="loadSheetData()">Retry</button></p>
+            </div>
+        </section>
+
+        <section class="table-section">
+            <div class="section-header">
+                <h2 class="section-title">All jobs scraped data</h2>
+            </div>
+            <div class="table-card glass-card">
+                <div class="table-controls">
+                    <span id="tableCount">0 records</span>
+                </div>
+                <div class="table-wrapper">
+                    <table class="data-table" id="dataTable">
+                        <thead>
+                            <tr>
+                                <th>Company name</th>
+                                <th>Job type</th>
+                                <th>City</th>
+                                <th>JD</th>
+                                <th>Company job url</th>
+                                <th>Salary</th>
+                                <th>Company descriptions</th>
+                                <th>Title</th>
+                                <th>Match score analysis</th>
+                                <th>Website</th>
+                                <th>Decision maker email</th>
+                                <th>Outreach email text</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody"></tbody>
+                    </table>
+                </div>
+                <div id="emptyState" class="empty-state">
+                    <h3>Waiting for Webhook Data</h3>
+                    <p>Submit a scraping request. Data will appear here when the n8n webhook responds.</p>
+                </div>
+                <div id="tableError" class="error-state" style="display: none;">
+                    <p>Failed to load data. <button class="btn-link" onclick="loadTableData()">Retry</button></p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>&copy; 2026 Intelligent Job Board Scraper. All rights reserved.</p>
+    </footer>
+
+    <!-- Text View Modal -->
+    <div id="textModal" class="modal">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <div class="header-main">
+                    <h3 id="modalTitle">Full Text</h3>
+                    <span id="modalMeta" class="modal-meta"></span>
+                </div>
+                <div class="modal-header-actions">
+                    <button id="editBtn" class="btn-icon" title="Edit Content">Edit</button>
+                    <button class="modal-close" id="closeModal">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div id="modalBodyText" class="modal-body-text"></div>
+                <textarea id="modalEditText" class="modal-edit-text" style="display: none;"></textarea>
+            </div>
+            <div class="modal-footer" id="modalFooter" style="display: none;">
+                <div class="footer-actions">
+                    <button id="cancelBtn" class="btn-secondary btn-sm">Cancel</button>
+                    <button id="saveBtn" class="btn-primary btn-sm">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
