@@ -199,12 +199,17 @@ async function handleFormSubmit(e) {
 
         console.log('Sending payload:', payload);
 
-        await fetch(CONFIG.webhookUrl, {
+        console.log('Sending payload:', payload);
+
+        const response = await fetch(CONFIG.webhookUrl, {
             method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'text/plain' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+
+        if (!response.ok) {
+            throw new Error(`Server returned ${response.status} ${response.statusText}`);
+        }
 
         // With no-cors, we can't read the response status, 
         // so we assume success if no networking error occurred.
