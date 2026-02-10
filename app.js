@@ -91,7 +91,10 @@ function setupEventListeners() {
 
             // Find the original index in sheetData
             // Since we reversed the data for the table, we need to find the match
-            const dataIndex = sheetData.findIndex(item => item.companyName === companyName && (item.jd === fullText || item.companyDescription === fullText || item.outreachEmailText === fullText));
+            const dataIndex = sheetData.findIndex(item =>
+                item.companyName === companyName &&
+                (item.jd === fullText || item.companyDescription === fullText || item.outreachEmailText === fullText || item.city === fullText)
+            );
 
             openModal(companyName, fullText, {
                 dataIndex,
@@ -378,6 +381,26 @@ function parseCSV(csvText) {
 
             // Handle some common CSV artifacts like escaped newlines
             value = value.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+
+            // Clean City column to remove raw JSON if present
+            if (mappedKey === 'city' && value.trim().startsWith('{')) {
+                try {
+                    const cityObj = JSON.parse(value);
+                    const parts = [];
+                    // Extract structured location data
+                    if (cityObj.city && cityObj.city !== 'null') parts.push(cityObj.city);
+                    if (cityObj.state && cityObj.state !== 'null') parts.push(cityObj.state);
+                    if (cityObj.country && cityObj.country !== 'null') parts.push(cityObj.country);
+
+                    if (parts.length > 0) {
+                        value = parts.join(', ');
+                    } else if (cityObj.formattedAddressShort) {
+                        value = cityObj.formattedAddressShort;
+                    }
+                } catch (e) {
+                    // diverse formats sometimes occur, fallback to original if parse fails
+                }
+            }
 
             row[mappedKey] = value;
         });
@@ -675,7 +698,7 @@ function renderTable(data) {
         <tr>
             <td>${escapeHtml(row.companyName || '')}</td>
             <td>${escapeHtml(row.jobType || '')}</td>
-            <td>${escapeHtml(row.city || '')}</td>
+            <td class="wrap">${renderExpandableCell(row.city || '', 40)}</td>
             <td class="wrap">${renderExpandableCell(row.jd || '', 100)}</td>
             <td>${formatUrl(row.companyJobUrl || '')}</td>
             <td>${escapeHtml(row.salary || '')}</td>
