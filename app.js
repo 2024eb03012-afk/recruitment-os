@@ -5,7 +5,7 @@ const CONFIG = {
     googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1DAVbKlf0bI3Dkmt8YQlAawoG7Oeez4px6vHhWy7Ts8w/gviz/tq?tqx=out:csv&sheet=Sheet3',
     // Auto-refresh interval in milliseconds (30 seconds)
     refreshInterval: 30000,
-    emailWebhookUrl: 'https://n8n.zenquill.tech/webhook-test/f21f355b-e854-48c6-a58f-2de26c242998'
+    emailWebhookUrl: 'https://n8n.smallgrp.com/webhook-test/8f452cec-9856-40ce-a791-e81b57bef0e3'
 };
 
 // Column mapping from Google Sheet headers to display
@@ -183,11 +183,27 @@ async function handleFormSubmit(e) {
     try {
         // Using 'no-cors' mode and 'text/plain' to bypass CORS preflight checks 
         // that often block requests from localhost to production n8n servers.
+        // Create the specific payload structure requested
+        const payload = [{
+            "headers": {
+                "host": "n8n.zenquill.tech",
+                "user-agent": navigator.userAgent,
+                "content-type": "application/json",
+                "origin": window.location.origin,
+                "referer": window.location.href
+            },
+            "params": {},
+            "query": {},
+            "body": formData,
+            "webhookUrl": CONFIG.webhookUrl,
+            "executionMode": "test"
+        }];
+
         await fetch(CONFIG.webhookUrl, {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify(formData)
+            body: JSON.stringify(payload)
         });
 
         // With no-cors, we can't read the response status, 
