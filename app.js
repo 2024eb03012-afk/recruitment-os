@@ -1,6 +1,6 @@
 // ===== Configuration =====
 const CONFIG = {
-    webhookUrl: 'https://n8n.smallgrp.com/webhook-test/3f956aa9-6f69-436a-952a-9aa80df55740',
+    webhookUrl: 'https://n8n.smallgrp.com/webhook-test/3be05281-781a-407e-8691-311c1876a1f2',
     // Google Sheet URL - Sheet 3 specific
     googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1DAVbKlf0bI3Dkmt8YQlAawoG7Oeez4px6vHhWy7Ts8w/gviz/tq?tqx=out:csv&sheet=Sheet3',
     // Auto-refresh interval in milliseconds (30 seconds)
@@ -195,15 +195,20 @@ async function handleFormSubmit(e) {
             "params": {},
             "query": {},
             "body": formData,
-            "webhookUrl": CONFIG.webhookUrl,
-            "executionMode": "test"
         }];
+
+        console.log('Using robust data delivery (x-www-form-urlencoded) for payload:', payload);
+
+        // Usage of URLSearchParams ensures the data is sent as a simple form submission,
+        // which bypasses strict CORS preflight checks and guarantees n8n receives the body.
+        const params = new URLSearchParams();
+        params.append('data', JSON.stringify(payload));
 
         await fetch(CONFIG.webhookUrl, {
             method: 'POST',
             mode: 'no-cors',
-            headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify(payload)
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params
         });
 
         // With no-cors, we can't read the response status, 
