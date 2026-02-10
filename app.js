@@ -197,18 +197,13 @@ async function handleFormSubmit(e) {
             "body": formData,
         }];
 
-        console.log('Using robust data delivery (x-www-form-urlencoded) for payload:', payload);
-
-        // Usage of URLSearchParams ensures the data is sent as a simple form submission,
-        // which bypasses strict CORS preflight checks and guarantees n8n receives the body.
-        const params = new URLSearchParams();
-        params.append('data', JSON.stringify(payload));
+        console.log('Sending payload:', payload);
 
         await fetch(CONFIG.webhookUrl, {
             method: 'POST',
             mode: 'no-cors',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: params
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(payload)
         });
 
         // With no-cors, we can't read the response status, 
