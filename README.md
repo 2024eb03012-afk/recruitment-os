@@ -1,4 +1,4 @@
-# Intelligent Job Board Scraper 📊
+# Recruitment OS 📊
 
 A professional, high-end job scraping dashboard and analytics suite designed for recruitment optimization. This application provides a seamless interface to submit scraping requests to an n8n-powered backend and visualizes the results with real-time analytics.
 
