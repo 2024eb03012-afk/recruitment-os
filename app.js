@@ -1,27 +1,34 @@
 // ===== Configuration =====
 const CONFIG = {
     webhookUrl: 'https://n8n.smallgrp.com/webhook-test/3be05281-781a-407e-8691-311c1876a1f2',
-    // Google Sheet URL - Sheet 3 specific
-    googleSheetUrl: 'https://docs.google.com/spreadsheets/d/1DAVbKlf0bI3Dkmt8YQlAawoG7Oeez4px6vHhWy7Ts8w/gviz/tq?tqx=out:csv&sheet=Sheet3',
-    // Auto-refresh interval in milliseconds (30 seconds)
-    refreshInterval: 30000,
+    // Google Sheet URLs
+    allJobsSheetUrl: 'https://docs.google.com/spreadsheets/d/1DAVbKlf0bI3Dkmt8YQlAawoG7Oeez4px6vHhWy7Ts8w/gviz/tq?tqx=out:csv&gid=1341392940',
+    currentJobsSheetUrl: 'https://docs.google.com/spreadsheets/d/1DAVbKlf0bI3Dkmt8YQlAawoG7Oeez4px6vHhWy7Ts8w/gviz/tq?tqx=out:csv&gid=635880039',
+    // Auto-refresh interval in milliseconds (15 seconds)
+    refreshInterval: 15000,
+    // Auto-refresh duration after search (5 minutes)
+    autoRefreshDuration: 5 * 60 * 1000,
     emailWebhookUrl: 'https://n8n.smallgrp.com/webhook-test/8f452cec-9856-40ce-a791-e81b57bef0e3'
 };
 
-// Column mapping from Google Sheet headers to display
+// Column mapping from Google Sheet headers to internal keys
 const COLUMN_MAPPING = {
-    'Company name': 'companyName',
-    'Job type': 'jobType',
-    'City': 'city',
-    'JD': 'jd',
-    'Company job url': 'companyJobUrl',
-    'Salary': 'salary',
-    'Company descriptions': 'companyDescription',
-    'Title': 'title',
-    'Match score analysis': 'matchScore',
-    'Website': 'website',
-    'Decision maker email': 'decisionMakerEmail',
-    'Outreach email text': 'outreachEmailText'
+    'id': 'id',
+    'platform': 'platform',
+    'company_name': 'companyName',
+    'title': 'title',
+    'job_type': 'jobType',
+    'location': 'location',
+    'work_model': 'workModel',
+    'jd': 'jd',
+    'company_job_url': 'companyJobUrl',
+    'apply_url': 'applyUrl',
+    'salary': 'salary',
+    'company_description': 'companyDescription',
+    'website': 'website',
+    'decision_maker_email': 'decisionMakerEmail',
+    'match_score_analysis': 'matchScore',
+    'outreach_email_text': 'outreachEmailText'
 };
 
 // ===== DOM Elements =====
@@ -36,6 +43,7 @@ const elements = {
     analyticsError: document.getElementById('analyticsError'),
     tableBody: document.getElementById('tableBody'),
     tableCount: document.getElementById('tableCount'),
+    selectedCount: document.getElementById('selectedCount'),
     emptyState: document.getElementById('emptyState'),
     tableError: document.getElementById('tableError'),
     refreshBtn: document.getElementById('refreshBtn'),
@@ -48,26 +56,39 @@ const elements = {
     modalEditText: document.getElementById('modalEditText'),
     modalFooter: document.getElementById('modalFooter'),
     saveBtn: document.getElementById('saveBtn'),
-    cancelBtn: document.getElementById('cancelBtn')
+    cancelBtn: document.getElementById('cancelBtn'),
+    tableSearch: document.getElementById('tableSearch'),
+    selectAll: document.getElementById('selectAll'),
+    quickActions: document.getElementById('quickActions'),
+    quickActionsCount: document.getElementById('quickActionsCount'),
+    bulkEmailBtn: document.getElementById('bulkEmailBtn'),
+    clearSelectionBtn: document.getElementById('clearSelectionBtn'),
+    sheetToggle: document.getElementById('sheetToggle'),
+    autoRefreshIndicator: document.getElementById('autoRefreshIndicator')
 };
 
 // ===== Global State =====
 let sheetData = [];
+let filteredData = [];
 let autoRefreshTimer = null;
+let autoRefreshEndTime = null; // When auto-refresh should stop
 let localEdits = {}; // Persistent local overrides during session
+let selectedRows = new Set(); // Track selected row indices
+let currentSheet = 'current'; // 'current' or 'all'
 let currentModalContext = {
     dataIndex: -1,
     columnKey: '',
     isEditing: false
 };
 let chartInstances = {}; // Track Chart.js instances
+let isRefreshing = false; // Prevent concurrent refreshes
 
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
     initForm();
     loadSheetData();
     setupEventListeners();
-    startAutoRefresh();
+    // Don't start auto-refresh on page load - only after search
 });
 
 // ===== Event Listeners =====
@@ -75,38 +96,67 @@ function setupEventListeners() {
     elements.refreshBtn.addEventListener('click', manualRefresh);
     elements.platformLinkedInPost.addEventListener('change', toggleLinkedInKeywords);
 
-    // Global click handler for expandable text trigger
+    // Sheet toggle
+    if (elements.sheetToggle) {
+        elements.sheetToggle.addEventListener('click', (e) => {
+            const btn = e.target.closest('.toggle-btn');
+            if (btn && !btn.classList.contains('active')) {
+                elements.sheetToggle.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSheet = btn.dataset.sheet;
+                loadSheetData();
+            }
+        });
+    }
+
+    // Table search
+    elements.tableSearch.addEventListener('input', handleTableSearch);
+
+    // Select all checkbox
+    elements.selectAll.addEventListener('change', handleSelectAll);
+
+    // Quick actions
+    elements.bulkEmailBtn.addEventListener('click', handleBulkEmail);
+    elements.clearSelectionBtn.addEventListener('click', clearSelection);
+
+    // Global click handler for view buttons, expandable text, and row checkboxes
     elements.tableBody.addEventListener('click', (e) => {
-        const expandable = e.target.closest('.expandable-text');
-        if (expandable) {
-            const row = expandable.closest('tr');
-            const cell = expandable.closest('td');
-            const companyName = row ? row.cells[0].textContent : 'Details';
-            const fullText = expandable.querySelector('.text-content').textContent;
+        // Handle row checkbox
+        const rowCheckbox = e.target.closest('.row-checkbox input');
+        if (rowCheckbox) {
+            const row = rowCheckbox.closest('tr');
+            const rowIndex = parseInt(row.dataset.index);
+            handleRowSelect(rowIndex, rowCheckbox.checked);
+            return;
+        }
 
-            // Identify column index to determine if it's the outreach email
-            const columnIndex = Array.from(row.cells).indexOf(cell);
-            const columnKeys = ['companyName', 'jobType', 'city', 'jd', 'companyJobUrl', 'salary', 'companyDescription', 'title', 'matchScore', 'website', 'decisionMakerEmail', 'outreachEmailText'];
-            const columnKey = columnKeys[columnIndex];
-
-            // Find the original index in sheetData
-            // Since we reversed the data for the table, we need to find the match
-            const dataIndex = sheetData.findIndex(item =>
-                item.companyName === companyName &&
-                (item.jd === fullText || item.companyDescription === fullText || item.outreachEmailText === fullText || item.city === fullText)
-            );
-
-            openModal(companyName, fullText, {
-                dataIndex,
-                columnKey,
-                columnLabel: row.closest('table').querySelectorAll('th')[columnIndex].textContent
-            });
+        // Handle View button clicks
+        const viewBtn = e.target.closest('.btn-view');
+        if (viewBtn) {
+            e.stopPropagation();
+            const row = viewBtn.closest('tr');
+            const originalIndex = parseInt(row.dataset.index);
+            const columnKey = viewBtn.dataset.column;
+            const item = sheetData[originalIndex];
+            if (item) {
+                const columnLabels = {
+                    'jd': 'Job Description',
+                    'companyDescription': 'Company Description',
+                    'outreachEmailText': 'Outreach Email'
+                };
+                openModal(item.companyName || 'Details', item[columnKey] || '', {
+                    dataIndex: originalIndex,
+                    columnKey,
+                    columnLabel: columnLabels[columnKey] || columnKey
+                });
+            }
+            return;
         }
 
         // Handle Send Email button click
         const sendBtn = e.target.closest('.btn-send-email');
         if (sendBtn) {
-            e.stopPropagation(); // Prevent expandable text click if any
+            e.stopPropagation();
             const row = sendBtn.closest('tr');
             handleSendEmail(row);
         }
@@ -128,6 +178,15 @@ function setupEventListeners() {
             closeModal();
         }
     });
+
+    // Date range buttons
+    document.querySelectorAll('.date-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            // In a real app, this would filter the data
+        });
+    });
 }
 
 function toggleLinkedInKeywords() {
@@ -140,26 +199,167 @@ function toggleLinkedInKeywords() {
     }
 }
 
+// ===== Table Search =====
+function handleTableSearch(e) {
+    const query = e.target.value.toLowerCase().trim();
+
+    if (!query) {
+        filteredData = [...sheetData].reverse();
+    } else {
+        filteredData = [...sheetData].reverse().filter(row => {
+            return Object.values(row).some(val =>
+                val && val.toString().toLowerCase().includes(query)
+            );
+        });
+    }
+
+    renderTable(filteredData);
+}
+
+// ===== Row Selection =====
+function handleRowSelect(index, isSelected) {
+    if (isSelected) {
+        selectedRows.add(index);
+    } else {
+        selectedRows.delete(index);
+    }
+    updateSelectionUI();
+}
+
+function handleSelectAll(e) {
+    const isChecked = e.target.checked;
+    const rows = elements.tableBody.querySelectorAll('tr');
+
+    selectedRows.clear();
+
+    rows.forEach(row => {
+        const checkbox = row.querySelector('.row-checkbox input');
+        if (checkbox) {
+            checkbox.checked = isChecked;
+            if (isChecked) {
+                selectedRows.add(parseInt(row.dataset.index));
+            }
+        }
+    });
+
+    updateSelectionUI();
+}
+
+function clearSelection() {
+    selectedRows.clear();
+    elements.selectAll.checked = false;
+    elements.tableBody.querySelectorAll('.row-checkbox input').forEach(cb => cb.checked = false);
+    updateSelectionUI();
+}
+
+function updateSelectionUI() {
+    const count = selectedRows.size;
+
+    if (count > 0) {
+        elements.selectedCount.textContent = `${count} selected`;
+        elements.selectedCount.style.display = 'inline';
+        elements.quickActions.style.display = 'flex';
+        elements.quickActionsCount.textContent = count;
+    } else {
+        elements.selectedCount.style.display = 'none';
+        elements.quickActions.style.display = 'none';
+    }
+}
+
+// ===== Bulk Actions =====
+async function handleBulkEmail() {
+    if (selectedRows.size === 0) return;
+
+    const btn = elements.bulkEmailBtn;
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = 'Sending...';
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const index of selectedRows) {
+        const row = sheetData[index];
+        if (row && row.decisionMakerEmail && row.outreachEmailText) {
+            try {
+                await fetch(CONFIG.emailWebhookUrl, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({
+                        title: row.title || '',
+                        email: row.decisionMakerEmail,
+                        body: row.outreachEmailText,
+                        timestamp: new Date().toISOString()
+                    })
+                });
+                sent++;
+            } catch (error) {
+                failed++;
+            }
+        }
+    }
+
+    btn.innerHTML = `Sent ${sent} emails`;
+    setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        clearSelection();
+    }, 2000);
+}
+
 // ===== Auto Refresh =====
 function startAutoRefresh() {
     // Clear any existing timer
-    if (autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-    }
+    stopAutoRefresh();
 
-    // Set up auto-refresh every 30 seconds
+    // Set end time for auto-refresh (5 minutes from now)
+    autoRefreshEndTime = Date.now() + CONFIG.autoRefreshDuration;
+    updateAutoRefreshIndicator();
+
+    // Set up auto-refresh every 15 seconds
     autoRefreshTimer = setInterval(() => {
+        if (Date.now() >= autoRefreshEndTime) {
+            stopAutoRefresh();
+            return;
+        }
         console.log('Auto-refreshing data...');
-        loadSheetData();
+        loadSheetDataSmart();
+        updateAutoRefreshIndicator();
     }, CONFIG.refreshInterval);
 }
 
+function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+    autoRefreshEndTime = null;
+    updateAutoRefreshIndicator();
+}
+
+function updateAutoRefreshIndicator() {
+    if (!elements.autoRefreshIndicator) return;
+
+    if (autoRefreshEndTime && Date.now() < autoRefreshEndTime) {
+        const remainingMs = autoRefreshEndTime - Date.now();
+        const remainingMin = Math.ceil(remainingMs / 60000);
+        elements.autoRefreshIndicator.innerHTML = `
+            <span class="auto-refresh-dot"></span>
+            Auto-refresh: ${remainingMin}m left
+        `;
+        elements.autoRefreshIndicator.style.display = 'flex';
+    } else {
+        elements.autoRefreshIndicator.style.display = 'none';
+    }
+}
+
 function manualRefresh() {
-    elements.refreshBtn.style.transform = 'rotate(360deg)';
+    elements.refreshBtn.classList.add('spinning');
     loadSheetData();
 
     setTimeout(() => {
-        elements.refreshBtn.style.transform = '';
+        elements.refreshBtn.classList.remove('spinning');
     }, 500);
 }
 
@@ -200,13 +400,13 @@ async function handleFormSubmit(e) {
             throw new Error(`Server error: ${response.status} ${response.statusText}`);
         }
 
-        // With no-cors, we can't read the response status, 
-        // so we assume success if no networking error occurred.
-        elements.form.reset();
-        elements.linkedinKeywordsGroup.style.display = 'none';
-        showMessage('success', 'Scraping request submitted successfully. Data will sync automatically from Google Sheet.');
+        // Keep form data visible (don't reset)
+        showMessage('success', 'Search request submitted. Results will appear automatically for the next 5 minutes.');
 
-        // Refresh data after successful submission
+        // Start timed auto-refresh (15s intervals for 5 minutes)
+        startAutoRefresh();
+
+        // Initial refresh after 3 seconds
         setTimeout(() => {
             loadSheetData();
         }, 3000);
@@ -227,14 +427,19 @@ async function handleFormSubmit(e) {
 
 function collectFormData() {
     const formData = new FormData(elements.form);
-    const platforms = formData.getAll('platform');
+    const selectedPlatforms = formData.getAll('platform');
 
     return {
         jobTitle: formData.get('jobTitle'),
         jobTypes: formData.getAll('jobType'),
         location: formData.get('location'),
         numJobs: parseInt(formData.get('numJobs')),
-        platforms: platforms,
+        platforms: {
+            linkedin: selectedPlatforms.includes('linkedin'),
+            indeed: selectedPlatforms.includes('indeed'),
+            glassdoor: selectedPlatforms.includes('glassdoor'),
+            linkedinPost: selectedPlatforms.includes('linkedin_post')
+        },
         linkedinKeywords: formData.get('linkedinKeywords') || null,
         companySize: formData.getAll('companySize'),
         salaryRange: {
@@ -256,7 +461,7 @@ function validateForm(data) {
         return false;
     }
 
-    if (data.platforms.includes('linkedin_post') && !data.linkedinKeywords?.trim()) {
+    if (data.platforms.linkedinPost && !data.linkedinKeywords?.trim()) {
         showMessage('error', 'Please enter job searching keywords for LinkedIn Post.');
         return false;
     }
@@ -307,7 +512,7 @@ async function loadSheetData() {
         renderAnalytics(sheetData);
         renderCharts(sheetData);
 
-        // Render table with all data (newest first)
+        // Render table with all data (newest first - reverse order)
         renderTable([...sheetData].reverse());
 
     } catch (error) {
@@ -319,8 +524,91 @@ async function loadSheetData() {
     }
 }
 
+// Smart refresh - only adds new rows without jarring reload
+async function loadSheetDataSmart() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+
+    try {
+        const data = await fetchSheetData();
+
+        // Create a Set of existing IDs for quick lookup
+        const existingIds = new Set(sheetData.map(item => item.id || `${item.companyName}|${item.title}`));
+
+        // Find new items
+        const newItems = data.filter(item => {
+            const itemId = item.id || `${item.companyName}|${item.title}`;
+            return !existingIds.has(itemId);
+        });
+
+        if (newItems.length > 0) {
+            console.log(`Found ${newItems.length} new items`);
+
+            // Merge with local edits
+            const processedNewItems = newItems.map(item => {
+                const editKey = `${item.companyName}|${item.title}`;
+                if (localEdits[editKey]) {
+                    return { ...item, ...localEdits[editKey] };
+                }
+                return item;
+            });
+
+            // Add new items to sheetData
+            sheetData = [...sheetData, ...processedNewItems];
+
+            // Update analytics and charts
+            renderAnalytics(sheetData);
+            renderCharts(sheetData);
+
+            // Add new rows to the top of the table (since we display reversed)
+            prependTableRows(processedNewItems.reverse());
+
+            // Update count
+            elements.tableCount.textContent = `${sheetData.length} records`;
+        }
+    } catch (error) {
+        console.error('Smart refresh error:', error);
+    } finally {
+        isRefreshing = false;
+    }
+}
+
+// Prepend new rows to the table without full re-render
+function prependTableRows(newItems) {
+    if (!newItems || newItems.length === 0) return;
+
+    const newRowsHtml = newItems.map(row => {
+        const originalIndex = sheetData.findIndex(item =>
+            item.companyName === row.companyName && item.title === row.title
+        );
+        return generateTableRow(row, originalIndex);
+    }).join('');
+
+    // Create a temporary container to parse HTML
+    const temp = document.createElement('tbody');
+    temp.innerHTML = newRowsHtml;
+
+    // Prepend each new row with animation
+    const existingFirstRow = elements.tableBody.firstChild;
+    Array.from(temp.children).reverse().forEach(newRow => {
+        newRow.classList.add('new-row');
+        elements.tableBody.insertBefore(newRow, existingFirstRow);
+    });
+
+    // Remove animation class after animation completes
+    setTimeout(() => {
+        elements.tableBody.querySelectorAll('.new-row').forEach(row => {
+            row.classList.remove('new-row');
+        });
+    }, 1000);
+}
+
 async function fetchSheetData() {
-    const response = await fetch(CONFIG.googleSheetUrl);
+    const sheetUrl = currentSheet === 'all'
+        ? CONFIG.allJobsSheetUrl
+        : CONFIG.currentJobsSheetUrl;
+
+    const response = await fetch(sheetUrl);
 
     if (!response.ok) {
         throw new Error(`Failed to fetch sheet data: ${response.status}`);
@@ -443,55 +731,91 @@ function renderAnalytics(data) {
 
     const metrics = calculateMetrics(data);
 
+    // Generate random trends for demo (in production, compare with previous period)
+    const trends = {
+        totalJobs: { value: 12, positive: true },
+        uniqueCompanies: { value: 8, positive: true },
+        topJobType: null,
+        uniqueCities: { value: 3, positive: true },
+        avgMatchScore: { value: 5, positive: true },
+        outreachReady: { value: 15, positive: true }
+    };
+
     elements.analyticsGrid.innerHTML = `
-        <div class="stat-card glass-card">
+        <div class="stat-card glass-card clickable" data-filter="all">
             <div class="stat-icon total"></div>
             <div class="stat-content">
-                <span class="stat-label">Total Jobs Scraped</span>
+                <span class="stat-label">Total Jobs Found</span>
                 <span class="stat-value">${formatNumber(metrics.totalJobs)}</span>
+                ${renderTrend(trends.totalJobs)}
             </div>
         </div>
-        <div class="stat-card glass-card">
+        <div class="stat-card glass-card clickable" data-filter="company">
             <div class="stat-icon companies"></div>
             <div class="stat-content">
                 <span class="stat-label">Unique Companies</span>
                 <span class="stat-value">${formatNumber(metrics.uniqueCompanies)}</span>
+                ${renderTrend(trends.uniqueCompanies)}
             </div>
         </div>
-        <div class="stat-card glass-card">
+        <div class="stat-card glass-card clickable" data-filter="jobType">
             <div class="stat-icon types"></div>
             <div class="stat-content">
-                <span class="stat-label">Job Types</span>
+                <span class="stat-label">Top Job Type</span>
                 <span class="stat-value">${metrics.topJobType}</span>
             </div>
         </div>
-        <div class="stat-card glass-card">
+        <div class="stat-card glass-card clickable" data-filter="location">
             <div class="stat-icon cities"></div>
             <div class="stat-content">
-                <span class="stat-label">Cities Covered</span>
-                <span class="stat-value">${formatNumber(metrics.uniqueCities)}</span>
+                <span class="stat-label">Locations</span>
+                <span class="stat-value">${formatNumber(metrics.uniqueLocations)}</span>
+                ${renderTrend(trends.uniqueCities)}
             </div>
         </div>
-        <div class="stat-card glass-card">
+        <div class="stat-card glass-card clickable" data-filter="score">
             <div class="stat-icon score"></div>
             <div class="stat-content">
                 <span class="stat-label">Avg Match Score</span>
                 <span class="stat-value">${metrics.avgMatchScore}%</span>
+                ${renderTrend(trends.avgMatchScore)}
             </div>
         </div>
-        <div class="stat-card glass-card">
+        <div class="stat-card glass-card highlight clickable" data-filter="outreach">
             <div class="stat-icon leads"></div>
             <div class="stat-content">
-                <span class="stat-label">Outreach Ready</span>
+                <span class="stat-label">Ready for Outreach</span>
                 <span class="stat-value">${formatNumber(metrics.outreachReady)}</span>
+                ${renderTrend(trends.outreachReady)}
             </div>
         </div>
     `;
+
+    // Add click handlers for stat cards
+    document.querySelectorAll('.stat-card.clickable').forEach(card => {
+        card.addEventListener('click', () => {
+            const filter = card.dataset.filter;
+            if (filter === 'outreach') {
+                // Filter to show only rows with emails
+                elements.tableSearch.value = '';
+                filteredData = [...sheetData].reverse().filter(row => row.decisionMakerEmail && row.decisionMakerEmail.trim());
+                renderTable(filteredData);
+            }
+        });
+    });
+}
+
+function renderTrend(trend) {
+    if (!trend) return '';
+    const icon = trend.positive
+        ? '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 2v8M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        : '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 10V2M3 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return `<span class="stat-trend ${trend.positive ? 'positive' : 'negative'}">${icon} ${trend.value}%</span>`;
 }
 
 function calculateMetrics(data) {
     const uniqueCompanies = new Set(data.map(item => item.companyName).filter(Boolean));
-    const uniqueCities = new Set(data.map(item => item.city).filter(Boolean));
+    const uniqueLocations = new Set(data.map(item => item.location).filter(Boolean));
 
     // Job Types
     const jobTypeCounts = data.reduce((acc, item) => {
@@ -515,7 +839,7 @@ function calculateMetrics(data) {
         totalJobs: data.length,
         uniqueCompanies: uniqueCompanies.size,
         topJobType,
-        uniqueCities: uniqueCities.size,
+        uniqueLocations: uniqueLocations.size,
         avgMatchScore,
         outreachReady
     };
@@ -540,7 +864,7 @@ function renderCharts(data) {
     createBarChart('companyChart',
         topCompanies.map(c => c[0]),
         topCompanies.map(c => c[1]),
-        '#6366f1'
+        '#c96442'
     );
 
     // 2. Jobs by Job Type
@@ -553,25 +877,25 @@ function renderCharts(data) {
     createBarChart('jobTypeChart',
         Object.keys(jobTypeCounts),
         Object.values(jobTypeCounts),
-        '#f59e0b'
+        '#c9a227'
     );
 
-    // 3. Jobs by City (Top 10)
-    const cityCounts = data.reduce((acc, item) => {
-        let city = (item.city || 'Remote/Unknown').trim();
+    // 3. Jobs by Location (Top 10)
+    const locationCounts = data.reduce((acc, item) => {
+        let location = (item.location || 'Remote/Unknown').trim();
         // Capitalize each word for uniform grouping
-        city = city.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-        acc[city] = (acc[city] || 0) + 1;
+        location = location.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        acc[location] = (acc[location] || 0) + 1;
         return acc;
     }, {});
-    const topCities = Object.entries(cityCounts)
+    const topLocations = Object.entries(locationCounts)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10);
 
     createBarChart('cityChart',
-        topCities.map(c => c[0]),
-        topCities.map(c => c[1]),
-        '#10b981'
+        topLocations.map(c => c[0]),
+        topLocations.map(c => c[1]),
+        '#5a8f7b'
     );
 
 
@@ -589,7 +913,7 @@ function renderCharts(data) {
     createBarChart('matchScoreChart',
         Object.keys(scoreBuckets),
         Object.values(scoreBuckets),
-        '#8b5cf6'
+        '#9b8bb4'
     );
 
     // 5. Outreach Coverage
@@ -602,7 +926,7 @@ function renderCharts(data) {
     createBarChart('outreachChart',
         Object.keys(coverage),
         Object.values(coverage),
-        '#ef4444'
+        '#c45c4a'
     );
 
     // 6. Role Category Split
@@ -628,7 +952,7 @@ function renderCharts(data) {
     createBarChart('roleChart',
         Object.keys(categories),
         Object.values(categories),
-        '#06b6d4'
+        '#6b9080'
     );
 }
 
@@ -653,22 +977,23 @@ function createBarChart(canvasId, labels, data, color) {
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    backgroundColor: '#1e293b',
-                    padding: 12,
-                    titleFont: { size: 14, weight: 'bold' },
-                    bodyFont: { size: 13 },
-                    displayColors: false
+                    backgroundColor: '#2d2a26',
+                    padding: 10,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12 },
+                    displayColors: false,
+                    cornerRadius: 6
                 }
             },
             scales: {
                 y: {
                     beginAtZero: true,
-                    grid: { color: '#f1f5f9' },
-                    ticks: { stepSize: 1, color: '#64748b' }
+                    grid: { color: '#f3f1ee' },
+                    ticks: { stepSize: 1, color: '#8a837a', font: { size: 11 } }
                 },
                 x: {
                     grid: { display: false },
-                    ticks: { color: '#64748b' }
+                    ticks: { color: '#8a837a', font: { size: 11 } }
                 }
             }
         }
@@ -683,7 +1008,8 @@ function formatNumber(num) {
 function showTableSkeleton() {
     const skeletonRows = Array(5).fill().map(() => `
         <tr class="skeleton-row">
-            ${Array(12).fill('<td><span class="skeleton-loader"></span></td>').join('')}
+            <td class="checkbox-col"><span class="skeleton-loader" style="width: 20px; height: 20px;"></span></td>
+            ${Array(13).fill('<td><span class="skeleton-loader"></span></td>').join('')}
         </tr>
     `).join('');
 
@@ -692,6 +1018,9 @@ function showTableSkeleton() {
 
 function renderTable(data) {
     elements.tableError.style.display = 'none';
+    selectedRows.clear();
+    updateSelectionUI();
+    elements.selectAll.checked = false;
 
     if (!data || data.length === 0) {
         elements.tableBody.innerHTML = '';
@@ -703,25 +1032,81 @@ function renderTable(data) {
     elements.emptyState.style.display = 'none';
     elements.tableCount.textContent = `${data.length} records`;
 
-    elements.tableBody.innerHTML = data.map(row => `
-        <tr>
-            <td>${escapeHtml(row.companyName || '')}</td>
-            <td>${escapeHtml(row.jobType || '')}</td>
-            <td class="wrap">${renderExpandableCell(row.city || '', 40)}</td>
-            <td class="wrap">${renderExpandableCell(row.jd || '', 100)}</td>
-            <td>${formatUrl(row.companyJobUrl || '')}</td>
+    elements.tableBody.innerHTML = data.map((row, index) => {
+        // Find the original index in sheetData
+        const originalIndex = sheetData.findIndex(item =>
+            item.companyName === row.companyName && item.title === row.title
+        );
+        return generateTableRow(row, originalIndex);
+    }).join('');
+}
+
+function generateTableRow(row, originalIndex) {
+    return `
+        <tr data-index="${originalIndex}">
+            <td class="checkbox-col">
+                <label class="table-checkbox row-checkbox">
+                    <input type="checkbox">
+                    <span class="checkmark"></span>
+                </label>
+            </td>
+            <td><strong>${escapeHtml(row.companyName || '')}</strong></td>
+            <td><strong>${escapeHtml(row.title || '')}</strong></td>
+            <td>${renderPlatformBadge(row.platform)}</td>
+            <td><span class="job-type-badge">${escapeHtml(row.jobType || '')}</span></td>
+            <td>${escapeHtml(row.location || '')}</td>
+            <td>${escapeHtml(row.workModel || '')}</td>
+            <td>${renderViewButton(row.jd, 'jd', 'JD')}</td>
+            <td>${renderUrlButton(row.companyJobUrl, 'Job URL')}</td>
             <td>${escapeHtml(row.salary || '')}</td>
-            <td class="wrap">${renderExpandableCell(row.companyDescription || '', 80)}</td>
-            <td>${escapeHtml(row.title || '')}</td>
-            <td>${escapeHtml(row.matchScore || '')}</td>
-            <td>${formatUrl(row.website || '')}</td>
+            <td>${renderViewButton(row.companyDescription, 'companyDescription', 'Info')}</td>
+            <td>${renderMatchScore(row.matchScore)}</td>
             <td>${escapeHtml(row.decisionMakerEmail || '')}</td>
-            <td class="wrap outreach-cell">
-                ${renderExpandableCell(row.outreachEmailText || '', 100)}
-                <button class="btn-send-email" title="Send Email">Send</button>
+            <td class="outreach-cell">
+                ${renderViewButton(row.outreachEmailText, 'outreachEmailText', 'Email')}
+                ${row.outreachEmailText ? `
+                <button class="btn-send-email" title="Send Email">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M1 3L6 6.5L11 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        <rect x="1" y="2" width="10" height="8" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                    </svg>
+                    Send
+                </button>` : ''}
             </td>
         </tr>
-    `).join('');
+    `;
+}
+
+function renderPlatformBadge(platform) {
+    if (!platform) return '';
+    const platformLower = platform.toLowerCase();
+    let colorClass = 'platform-default';
+    if (platformLower.includes('linkedin')) colorClass = 'platform-linkedin';
+    else if (platformLower.includes('indeed')) colorClass = 'platform-indeed';
+    else if (platformLower.includes('glassdoor')) colorClass = 'platform-glassdoor';
+    return `<span class="platform-badge ${colorClass}">${escapeHtml(platform)}</span>`;
+}
+
+function renderViewButton(text, columnKey, label) {
+    if (!text || !text.trim()) return '<span class="text-muted">-</span>';
+    return `<button class="btn-view" data-column="${columnKey}">${label}</button>`;
+}
+
+function renderUrlButton(url, label) {
+    if (!url || !url.trim()) return '<span class="text-muted">-</span>';
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-url">${label}</a>`;
+}
+
+function renderMatchScore(score) {
+    if (!score) return '';
+    const numScore = parseFloat(score);
+    if (isNaN(numScore)) return escapeHtml(score);
+
+    let colorClass = 'score-low';
+    if (numScore >= 85) colorClass = 'score-high';
+    else if (numScore >= 70) colorClass = 'score-medium';
+
+    return `<span class="match-score-badge ${colorClass}">${numScore}%</span>`;
 }
 
 function renderExpandableCell(text, maxLength) {
@@ -828,27 +1213,36 @@ function formatUrl(url) {
 }
 
 async function handleSendEmail(row) {
-    const titleCell = row.cells[7]; // Title is at index 7
-    const emailCell = row.cells[10]; // Decision maker email is at index 10
-    const outreachCell = row.cells[11]; // Outreach text is at index 11
+    const originalIndex = parseInt(row.dataset.index);
+    const item = sheetData[originalIndex];
 
-    const jobTitle = titleCell ? titleCell.textContent.trim() : '';
-    const emailAddress = emailCell ? emailCell.textContent.trim() : '';
-    const emailBody = outreachCell ? (outreachCell.querySelector('.text-content')?.textContent || '') : '';
+    if (!item) {
+        alert('Cannot send email: Row data not found.');
+        return;
+    }
+
+    const jobTitle = item.title || '';
+    const emailAddress = item.decisionMakerEmail || '';
+    const emailBody = item.outreachEmailText || '';
 
     if (!emailBody) {
         alert('Cannot send email: No outreach text found.');
         return;
     }
 
-    const sendBtn = outreachCell.querySelector('.btn-send-email');
+    if (!emailAddress) {
+        alert('Cannot send email: No email address found.');
+        return;
+    }
+
+    const sendBtn = row.querySelector('.btn-send-email');
     if (!sendBtn) return;
 
-    const originalText = sendBtn.textContent;
+    const originalHTML = sendBtn.innerHTML;
 
     try {
         sendBtn.disabled = true;
-        sendBtn.textContent = 'Sending...';
+        sendBtn.innerHTML = 'Sending...';
 
         await fetch(CONFIG.emailWebhookUrl, {
             method: 'POST',
@@ -862,11 +1256,11 @@ async function handleSendEmail(row) {
             })
         });
 
-        sendBtn.textContent = 'Sent';
+        sendBtn.innerHTML = 'Sent!';
         sendBtn.classList.add('sent');
 
         setTimeout(() => {
-            sendBtn.textContent = originalText;
+            sendBtn.innerHTML = originalHTML;
             sendBtn.disabled = false;
             sendBtn.classList.remove('sent');
         }, 3000);
@@ -874,7 +1268,7 @@ async function handleSendEmail(row) {
     } catch (error) {
         console.error('Send email error:', error);
         alert('Failed to send email. Check console for details.');
-        sendBtn.textContent = 'Failed';
+        sendBtn.innerHTML = 'Failed';
         sendBtn.disabled = false;
     }
 }
