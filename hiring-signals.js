@@ -163,6 +163,22 @@ const HiringSignalEngine = (() => {
         return str && (str.startsWith('http://') || str.startsWith('https://'));
     }
 
+    // Converts raw URLs in plain text into clickable styled buttons
+    function linkify(text) {
+        if (!text) return '';
+        const escaped = escapeHtml(text);
+        return escaped.replace(/(https?:\/\/[^\s&]+)/g, (url) => {
+            const isLinkedIn = url.includes('linkedin.com');
+            const label = isLinkedIn ? '&#128100; View LinkedIn &nbsp;&#8599;' : 'Open Link &nbsp;&#8599;';
+            const bg = isLinkedIn ? '#0A66C2' : '#3B82F6';
+            return `<a href="${url}" target="_blank" rel="noopener"
+                style="display:inline-flex;align-items:center;background:${bg};color:#fff;
+                padding:5px 12px;border-radius:7px;font-size:12px;font-weight:600;
+                text-decoration:none;margin:3px 2px;vertical-align:middle;">${label}</a>`;
+        });
+    }
+
+
     function renderViewButton(content, title, label, email = '') {
         if (!content || content === '-') return '<span class="text-muted">-</span>';
 
@@ -205,7 +221,8 @@ const HiringSignalEngine = (() => {
         const isEditable = title === 'Outreach Message';
         const bodyContent = isEditable
             ? `<textarea class="hs-modal-textarea" id="hsOutreachText">${escapeHtml(content)}</textarea>`
-            : `<div class="hs-modal-text">${isHtml ? content : escapeHtml(content)}</div>`;
+            : `<div class="hs-modal-text">${isHtml ? content : linkify(content)}</div>`;
+
 
         el.modalBody().innerHTML = bodyContent;
 
